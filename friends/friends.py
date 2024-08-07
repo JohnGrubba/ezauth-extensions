@@ -78,7 +78,7 @@ class FriendRequest(BaseModel):
     identifier: str
 
 
-@router.post("/add/{identifier}")
+@router.post("/add")
 async def add_friend(
     req: FriendRequest,
     background_tasks: BackgroundTasks,
@@ -115,7 +115,7 @@ async def add_friend(
     background_tasks.add_task(
         send_email, "FriendRequest", friend["email"], username=user["username"]
     )
-    return FriendRequestAccept(request_id=result.inserted_id)
+    return FriendRequestAccept(request_id=str(result.inserted_id))
 
 
 @router.post("/accept/", status_code=204)
@@ -154,10 +154,12 @@ async def decline_friend_request(
     user: dict = Depends(get_user_dep),
 ):
     """
-    # Decline Friend Request
+    # Decline Friend Request / Delete Friend
 
     ## Description
     This endpoint is used to decline a friend request.
+
+    Or to delete a friend
     """
     try:
         ObjectId(req.request_id)
