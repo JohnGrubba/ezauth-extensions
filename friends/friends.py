@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from api.dependencies.authenticated import get_user_dep
 from tools.db import db as mongoDB
-from crud.user import get_user_email_or_username
+from crud.user import get_user_email_or_username, get_user
 from tools import r, send_email, insecure_cols
 from bson import ObjectId
 from pydantic import BaseModel
@@ -150,6 +150,7 @@ async def add_friend(
 @router.post("/accept", status_code=204)
 async def accept_friend_request(
     req: FriendRequestAccept,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_user_dep),
 ):
     """
@@ -178,11 +179,23 @@ async def accept_friend_request(
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Friend request not found.")
+    else:
+        sender_usr = friends_collection.find_one(
+            {
+                "_id": ObjectId(req.request_id),
+                "receiver_id": ObjectId(user["_id"]),
+            }
+        )
+        sender_email = get_user(sender_usr["sender_id"])["email"]
+        background_tasks.add_task(
+            send_email, "FriendRequestAccepted", sender_email, username=user["username"]
+        )
 
 
 @router.delete("/remove", status_code=204)
 async def delete_friend(
     req: FriendRequestAccept,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_user_dep),
 ):
     """
@@ -198,6 +211,20 @@ async def delete_friend(
     except Exception:
         raise HTTPException(status_code=404, detail="Invalid ID.")
     # Get friend request (and check if it belongs to the user)
+    # Only get a sender_user if the receiver rejects the request
+    sender_usr = friends_collection.find_one(
+        {
+            "_id": ObjectId(req.request_id),
+            "receiver_id": ObjectId(user["_id"]),
+            "pending": True,
+        }
+    )
+    if sender_usr:
+        # Friend request was declined by other user (not deleted by user)
+        sender_email = get_user(sender_usr["sender_id"])["email"]
+        background_tasks.add_task(
+            send_email, "FriendRequestRejected", sender_email, username=user["username"]
+        )
     result = friends_collection.delete_one(
         {
             "_id": ObjectId(req.request_id),
