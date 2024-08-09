@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from api.dependencies.authenticated import get_user_dep
 from tools.db import db as mongoDB
 from crud.user import get_user_email_or_username
-from tools import r, send_email
+from tools import r, send_email, insecure_cols
 from bson import ObjectId
 from pydantic import BaseModel
+import datetime
 
 router = APIRouter(
     tags=["Friends Extension"],
@@ -12,6 +13,56 @@ router = APIRouter(
 )
 
 friends_collection = mongoDB.get_collection("friends")
+
+hide_friends_fields = {"sender._id": 0, "receiver._id": 0}
+for col in insecure_cols:
+    hide_friends_fields[f"sender.{col}"] = 0
+    hide_friends_fields[f"receiver.{col}"] = 0
+
+
+def aggregate_friends(user_id, pending: bool = None):
+    return list(
+        friends_collection.aggregate(
+            [
+                {
+                    "$match": {
+                        "pending": pending,
+                        "$or": [
+                            {"sender_id": ObjectId(user_id)},
+                            {"receiver_id": ObjectId(user_id)},
+                        ],
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "users",
+                        "localField": "sender_id",
+                        "foreignField": "_id",
+                        "as": "sender",
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "users",
+                        "localField": "receiver_id",
+                        "foreignField": "_id",
+                        "as": "receiver",
+                    }
+                },
+                {"$unwind": {"path": "$sender"}},
+                {"$unwind": {"path": "$receiver"}},
+                {"$project": hide_friends_fields},
+                {
+                    "$project": {
+                        "sender": 1,
+                        "receiver": 1,
+                        "request_id": {"$toString": "$_id"},
+                        "_id": 0,
+                    }
+                },
+            ]
+        )
+    )
 
 
 @router.get("")
@@ -22,23 +73,7 @@ async def friends(user: dict = Depends(get_user_dep)):
     ## Description
     This endpoint is used to get the friends of a user.
     """
-    return list(
-        friends_collection.find(
-            {
-                "$or": [
-                    {"user_id": ObjectId(user["_id"])},
-                    {"friend_id": ObjectId(user["_id"])},
-                ],
-                "pending": False,
-            },
-            {
-                "request_id": {"$toString": "$_id"},
-                "user_id": {"$toString": "$user_id"},
-                "friend_id": {"$toString": "$friend_id"},
-                "_id": 0,
-            },
-        )
-    )
+    return aggregate_friends(user["_id"])
 
 
 @router.get("/requests")
@@ -51,23 +86,16 @@ async def friend_requests(user: dict = Depends(get_user_dep)):
     Useful to accept or decline friend requests / cancel friend requests.
     Only returns friend requests, not friends.
     """
-    return list(
-        friends_collection.find(
-            {
-                "$or": [
-                    {"user_id": ObjectId(user["_id"])},
-                    {"friend_id": ObjectId(user["_id"])},
-                ],
-                "pending": True,
-            },
-            {
-                "request_id": {"$toString": "$_id"},
-                "user_id": {"$toString": "$user_id"},
-                "friend_id": {"$toString": "$friend_id"},
-                "_id": 0,
-            },
-        )
-    )
+    frds = aggregate_friends(user["_id"], True)
+    outgoing = []
+    ingoing = []
+    # ID is not visible in the response so we compare usernames (also unique)
+    for frd in frds:
+        if frd["sender"]["username"] == user["username"]:
+            outgoing.append(frd)
+        else:
+            ingoing.append(frd)
+    return {"outgoing": outgoing, "ingoing": ingoing}
 
 
 class FriendRequestAccept(BaseModel):
@@ -100,16 +128,17 @@ async def add_friend(
         )
     # Check if friend request already exists
     if friends_collection.count_documents(
-        {"user_id": user["_id"], "friend_id": friend["_id"]}
+        {"sender_id": user["_id"], "receiver_id": friend["_id"]}
     ) or friends_collection.count_documents(
-        {"user_id": friend["_id"], "friend_id": user["_id"]}
+        {"sender_id": friend["_id"], "receiver_id": user["_id"]}
     ):
-        raise HTTPException(status_code=400, detail="Friend request already exists.")
+        raise HTTPException(status_code=400, detail="Friend (request) already exists.")
     result = friends_collection.insert_one(
         {
-            "user_id": ObjectId(user["_id"]),
-            "friend_id": ObjectId(friend["_id"]),
+            "sender_id": ObjectId(user["_id"]),
+            "receiver_id": ObjectId(friend["_id"]),
             "pending": True,
+            "requestedAt": datetime.datetime.now(),
         }
     )
     background_tasks.add_task(
@@ -118,7 +147,7 @@ async def add_friend(
     return FriendRequestAccept(request_id=str(result.inserted_id))
 
 
-@router.post("/accept/", status_code=204)
+@router.post("/accept", status_code=204)
 async def accept_friend_request(
     req: FriendRequestAccept,
     user: dict = Depends(get_user_dep),
@@ -137,29 +166,32 @@ async def accept_friend_request(
     result = friends_collection.update_one(
         {
             "_id": ObjectId(req.request_id),
-            "$or": [
-                {"user_id": ObjectId(user["_id"])},
-                {"friend_id": ObjectId(user["_id"])},
-            ],
+            "receiver_id": ObjectId(user["_id"]),
+            "pending": True,
         },
-        {"$set": {"pending": False}},
+        {
+            "$set": {
+                "acceptedAt": datetime.datetime.now(),
+            },
+            "$unset": {"pending": ""},
+        },
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Friend request not found.")
 
 
-@router.post("/decline/", status_code=204)
-async def decline_friend_request(
+@router.delete("/remove", status_code=204)
+async def delete_friend(
     req: FriendRequestAccept,
     user: dict = Depends(get_user_dep),
 ):
     """
-    # Decline Friend Request / Delete Friend
+    # Delete Friend Request / Delete Friend
 
     ## Description
     This endpoint is used to decline a friend request.
 
-    Or to delete a friend
+    Or to delete a friend, or delete a friend request.
     """
     try:
         ObjectId(req.request_id)
@@ -170,10 +202,10 @@ async def decline_friend_request(
         {
             "_id": ObjectId(req.request_id),
             "$or": [
-                {"user_id": ObjectId(user["_id"])},
-                {"friend_id": ObjectId(user["_id"])},
+                {"sender_id": ObjectId(user["_id"])},
+                {"receiver_id": ObjectId(user["_id"])},
             ],
         }
     )
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Friend request not found.")
+        raise HTTPException(status_code=404, detail="Friend (request) not found.")
