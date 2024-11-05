@@ -136,7 +136,7 @@ async def add_friend(
     friend = get_user_identifier(req.identifier)
     if not friend:
         raise HTTPException(status_code=404, detail="Friend not found.")
-    if friend["_id"] == user["_id"]:
+    if ObjectId(friend["_id"]) is ObjectId(user["_id"]):
         raise HTTPException(
             status_code=400, detail="You should already be friends with yourself :)"
         )
