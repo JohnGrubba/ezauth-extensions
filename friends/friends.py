@@ -142,9 +142,9 @@ async def add_friend(
         )
     # Check if friend request already exists
     if friends_collection.count_documents(
-        {"sender_id": user["_id"], "receiver_id": friend["_id"]}
+        {"sender_id": ObjectId(user["_id"]), "receiver_id": ObjectId(friend["_id"])}
     ) or friends_collection.count_documents(
-        {"sender_id": friend["_id"], "receiver_id": user["_id"]}
+        {"sender_id": ObjectId(friend["_id"]), "receiver_id": ObjectId(user["_id"])}
     ):
         raise HTTPException(status_code=400, detail="Friend (request) already exists.")
 
