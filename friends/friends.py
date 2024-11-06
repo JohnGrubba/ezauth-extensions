@@ -8,6 +8,7 @@ from pydantic import BaseModel
 import datetime
 import json
 import os
+from api.helpers.log import logger
 
 router = APIRouter(
     tags=["Friends Extension"],
@@ -136,7 +137,7 @@ async def add_friend(
     friend = get_user_identifier(req.identifier)
     if not friend:
         raise HTTPException(status_code=404, detail="Friend not found.")
-    if ObjectId(friend["_id"]) is ObjectId(user["_id"]):
+    if ObjectId(friend["_id"]) == ObjectId(user["_id"]):
         raise HTTPException(
             status_code=400, detail="You should already be friends with yourself :)"
         )
