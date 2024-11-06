@@ -8,7 +8,6 @@ from pydantic import BaseModel
 import datetime
 import json
 import os
-from api.helpers.log import logger
 
 router = APIRouter(
     tags=["Friends Extension"],
