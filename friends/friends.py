@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from api.dependencies.authenticated import get_user_dep
 from tools.db import db as mongoDB
 from crud.user import get_user_identifier, get_user
-from tools import queue_email, insecure_cols, r, bson_to_json
+from tools import queue_email, insecure_cols, r
 from bson import ObjectId
 from pydantic import BaseModel
 import datetime
