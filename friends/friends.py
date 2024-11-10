@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from api.dependencies.authenticated import get_user_dep
 from tools.db import db as mongoDB
 from crud.user import get_user_identifier, get_user
-from tools import send_email, insecure_cols, r, bson_to_json
+from tools import queue_email, insecure_cols, r, bson_to_json
 from bson import ObjectId
 from pydantic import BaseModel
 import datetime
@@ -168,9 +168,7 @@ async def add_friend(
         int(friend_config["friend_add_timeout_seconds"]),
         str(user["_id"]),
     )
-    background_tasks.add_task(
-        send_email, "FriendRequest", friend["email"], username=user["username"]
-    )
+    queue_email("FriendRequest", friend["email"], username=user["username"])
     return FriendRequestAccept(request_id=str(result.inserted_id))
 
 
@@ -214,9 +212,7 @@ async def accept_friend_request(
             }
         )
         sender_email = get_user(sender_usr["sender_id"])["email"]
-        background_tasks.add_task(
-            send_email, "FriendRequestAccepted", sender_email, username=user["username"]
-        )
+        queue_email("FriendRequestAccepted", sender_email, username=user["username"])
 
 
 @router.delete("/remove", status_code=204)
@@ -249,9 +245,7 @@ async def delete_friend(
     if sender_usr:
         # Friend request was declined by other user (not deleted by user)
         sender_email = get_user(sender_usr["sender_id"])["email"]
-        background_tasks.add_task(
-            send_email, "FriendRequestRejected", sender_email, username=user["username"]
-        )
+        queue_email("FriendRequestRejected", sender_email, username=user["username"])
     result = friends_collection.delete_one(
         {
             "_id": ObjectId(req.request_id),
