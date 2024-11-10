@@ -123,7 +123,6 @@ class FriendRequest(BaseModel):
 @router.post("/add")
 async def add_friend(
     req: FriendRequest,
-    background_tasks: BackgroundTasks,
     user: dict = Depends(get_user_dep),
 ):
     """
@@ -168,14 +167,18 @@ async def add_friend(
         int(friend_config["friend_add_timeout_seconds"]),
         str(user["_id"]),
     )
-    queue_email("FriendRequest", friend["email"], username=user["username"])
+    queue_email(
+        "FriendRequest",
+        friend["email"],
+        requestor_username=user["username"],
+        username=friend["username"],
+    )
     return FriendRequestAccept(request_id=str(result.inserted_id))
 
 
 @router.post("/accept", status_code=204)
 async def accept_friend_request(
     req: FriendRequestAccept,
-    background_tasks: BackgroundTasks,
     user: dict = Depends(get_user_dep),
 ):
     """
@@ -212,13 +215,17 @@ async def accept_friend_request(
             }
         )
         sender_email = get_user(sender_usr["sender_id"])["email"]
-        queue_email("FriendRequestAccepted", sender_email, username=user["username"])
+        queue_email(
+            "FriendRequestAccepted",
+            sender_email,
+            acceptor_username=user["username"],
+            username=user["username"],
+        )
 
 
 @router.delete("/remove", status_code=204)
 async def delete_friend(
     req: FriendRequestAccept,
-    background_tasks: BackgroundTasks,
     user: dict = Depends(get_user_dep),
 ):
     """
@@ -245,7 +252,12 @@ async def delete_friend(
     if sender_usr:
         # Friend request was declined by other user (not deleted by user)
         sender_email = get_user(sender_usr["sender_id"])["email"]
-        queue_email("FriendRequestRejected", sender_email, username=user["username"])
+        queue_email(
+            "FriendRequestRejected",
+            sender_email,
+            decliner_username=user["username"],
+            username=user["username"],
+        )
     result = friends_collection.delete_one(
         {
             "_id": ObjectId(req.request_id),

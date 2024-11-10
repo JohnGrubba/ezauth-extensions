@@ -3,10 +3,15 @@
 ## Requirements
 ### E-Mail Templates
 - `FriendRequest.html` E-Mail Template in the `config/email` folder.
+    - `{{requestor_username}}` is the username of the user who sent the friend request.
+    - `{{username}}` is the username of the user who received the friend request (the user who gets the email).
 - `FriendRequestAccepted.html` E-Mail Template in the `config/email` folder. Gets sent to the user who sent the friend request when the request is accepted.
-    - `{username}` is the username of the user who accepted the request.
+    - `{{acceptor_username}}` is the username of the user who accepted the request.
+    - `{{username}}` is your own username. (The user who gets the email and sent the request)
 - `FriendRequestRejected.html` E-Mail Template in the `config/email` folder. Gets sent to the user who sent the friend request when the request is rejected.
-    - `{username}` is the username of the user who rejected the request.
+    - `{{decliner_username}}` is the username of the user who rejected the request.
+    - `{{username}}` is your own username. (The user who gets the email and sent the request)
+
 
 ### Configuration
 - `friend_add_timeout_seconds` - The timeout after a user can send another friend request to the same user after deleting the request. Default is 14 400 seconds (4 Hours).
